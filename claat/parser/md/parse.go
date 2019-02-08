@@ -24,6 +24,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -66,6 +67,7 @@ const (
 
 var metadataRegexp = regexp.MustCompile(`(.+?):(.+)`)
 var languageRegexp = regexp.MustCompile(`language-(.+)`)
+var includeRegexp = regexp.MustCompile(`!inc(\[(?P<params>[^]]*)\])?\((?P<path>[^\n]*)\)`)
 
 var (
 	// durFactor is a slice of duration parser multipliers,
@@ -299,6 +301,8 @@ func parseNode(ds *docState) (types.Node, bool) {
 		return survey(ds), true
 	case isTable(ds.cur):
 		return table(ds), true
+	case isInclude(ds.cur):
+		return includeCode(ds), true
 	}
 	return nil, false
 }
@@ -591,6 +595,28 @@ func code(ds *docState, term bool) types.Node {
 		v = "\n" + v
 	}
 	n := types.NewCodeNode(v, term)
+	n.MutateBlock(elem)
+	return n
+}
+
+func includeCode(ds *docState) types.Node {
+	elem := findParent(ds.cur, atom.P)
+	if elem == nil {
+		return text(ds)
+	}
+	re := includeRegexp.Copy()
+	re.MatchString(ds.cur.FirstChild.Data)
+	path := re.ReplaceAllString(ds.cur.FirstChild.Data, "${path}")
+	// params := re.ReplaceAllString(data, "${params}")
+	file, err := os.Open(path)
+	if err != nil {
+		panic(fmt.Sprintf("failed to open %s: %s", path, err.Error()))
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		panic(fmt.Sprintf("failed to read content %s: %s", path, err.Error()))
+	}
+	n := types.NewCodeNode(string(content), false)
 	n.MutateBlock(elem)
 	return n
 }
